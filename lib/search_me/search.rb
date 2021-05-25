@@ -1,6 +1,6 @@
 module SearchMe
   module Search
-    def search_attributes 
+    def search_attributes
       @search_attributes ||= default_hash
     end
 
@@ -9,17 +9,17 @@ module SearchMe
     end
 
     def default_hash(flat_key = :simple)
-      Hash.new { |h,k| 
+      Hash.new { |h,k|
         h[k] = (k == flat_key ? [] : Hash.new { |nh,nk| nh[nk] = [] })
       }
     end
 
     # assuming the last attribute could be a hash
-    def attr_search(*attributes)  
+    def attr_search(*attributes)
       options       = attributes.last.is_a?(Hash) ? attributes.pop : {}
       type          = (options.fetch(:type) { :simple }).to_sym
       accepted_keys = [:simple] + self.reflections.keys.map(&:to_sym)
-      
+
       unless accepted_keys.include?(type.to_sym)
         raise ArgumentError, 'incorect type given'
       end
@@ -66,19 +66,19 @@ module SearchMe
     def search(term)
       @joiner = :or
       condition = join([
-        simple_search_condition(term), 
+        simple_search_condition(term),
         reflection_search_condition(term)
       ])
       self.where(condition)
     end
 
-    def joiner 
+    def joiner
       @joiner ||= :or
       " #{@joiner.upcase} "
     end
 
     def advanced_search(search_terms)
-      search_terms = sanitize_params!(search_terms) 
+      search_terms = sanitize_params!(search_terms)
       @joiner = :and
 
       hash = default_hash
@@ -95,7 +95,7 @@ module SearchMe
             if advanced_search_block_for?(type, attribute)
               call_advanced_search_block_for(type, attribute, term)
             else
-              simple_search_where_condition(attribute, term)           
+              simple_search_where_condition(attribute, term)
             end
           })
         when :belongs_to
@@ -184,7 +184,7 @@ module SearchMe
         klass      = klass_for_reflection(reflection)
 
         reflection_condition = join(yield(attributes,klass,reflection))
-          
+
         search_result = klass.where(reflection_condition)
 
         outer_block.call(reflection, search_result)
@@ -236,7 +236,19 @@ module SearchMe
 
       case column.type
       when :string, :integer, :text, :float, :decimal
-        "CAST(#{table_column} AS CHAR) LIKE '%#{term}%'"
+        #"CAST(#{table_column} AS CHAR) LIKE '%#{term}%'"
+        # ENABLE SEARCH IGNORING SPECIAL CHARS (diacritics) FOR CZECH LANGUAGE:
+        # THIS SOLUTION IS READY FOR USING WITH SQLITE3 DB TOO !!!
+        # SQLITE3 DOES NOT HAVE COLLATE FUNCTIONS => USING REPLACE FUNCTION !!!
+        sql_string = "replace(LOWER(CAST(#{table_column} AS CHAR)),'á','a')"
+        areplace = [['ě','e'],['ů','u'],['é','e'],['š','s'],['í','i'],['ó','o'],['č','c'],['ř','r'],['ú','u'],['ž','z'],['ý','y'],['ť','t'],['ď','d'],['ň','n']]
+        areplace.each do |charz|
+          sql_string.prepend("replace(")
+          sql_string.concat(",'#{charz[0]}','#{charz[1]}')")
+        end
+        normalized_term = I18n.transliterate(term)
+        sql_string = "#{sql_string} LIKE '%#{normalized_term}%'"
+        sql_string
       when :boolean
         term = {
           true => "= 't'", false => "= 'f'", nil => 'IS NULL',
@@ -245,7 +257,7 @@ module SearchMe
           good_args = term.keys.map(:inspect).join(',')
           error = "boolean column term must be #{good_args}"
           raise ArgumentError, error
-        } 
+        }
         "#{table_column} #{term}"
       else
         warn "#{column.type} type is not supported by SearchMe::Search"
@@ -253,7 +265,7 @@ module SearchMe
     end
 
     def advanced_search_block_for?(type, attribute)
-      !advanced_search_blocks[type].blank? && 
+      !advanced_search_blocks[type].blank? &&
         !advanced_search_blocks[type][attribute].blank?
     end
 
@@ -262,7 +274,7 @@ module SearchMe
     end
 
     def object_ids(objects, column = nil)
-      (column ? objects.map(&column.to_sym) : objects.ids) << -5318008 
+      (column ? objects.map(&column.to_sym) : objects.ids) << -5318008
     end
 
     def through_klass_for_reflection(reflection)
@@ -289,7 +301,7 @@ module SearchMe
     end
 
     def sanitize_params!(params)
-      params.to_hash.symbolize_keys!.each { |k,v| 
+      params.to_hash.symbolize_keys!.each { |k,v|
         if v.is_a?(Hash)
           params[k] = v = v.to_hash
           sanitize_params!(v) and v.symbolize_keys!
